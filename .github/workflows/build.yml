@@ -90,6 +90,19 @@ jobs:
               p.write_text(s, errors="surrogateescape")
               print("[ok] patched: " + path)
           PY
+          cat > include/linux/static_call.h <<'EOF'
+          #ifndef _LINUX_STATIC_CALL_H
+          #define _LINUX_STATIC_CALL_H
+          #include <linux/types.h>
+          #define DEFINE_STATIC_CALL(name, target) typeof(target) *__sc_##name = (target)
+          #define DECLARE_STATIC_CALL(name, target) extern typeof(target) *__sc_##name
+          #define static_call(name) (__sc_##name)
+          #define static_call_cond(name) (__sc_##name)
+          #define static_call_update(name, fn) do { __sc_##name = (fn); } while (0)
+          #define DEFINE_STATIC_CALL_RET0(name, target) DEFINE_STATIC_CALL(name, target)
+          #define static_call_return0(name) 0
+          #endif
+          EOF
           printf '\n# KernelSU\nCONFIG_KSU=y\n# CONFIG_KSU_SUSFS is not set\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
 
 
