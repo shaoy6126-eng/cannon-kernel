@@ -59,10 +59,10 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
           test -L drivers/kernelsu
           # remove cpu_spoof extension (needs 5.3+ vdso/datapage.h)
-          sed -i '/#include "extension\/cpu_spoof.h"/d' ksu_main.c
-          sed -i '/#include "extension\/cpu_spoof.c"/d' ksu_main.c
-          sed -i '/cpu_spoof_handler = {/,/};/d' extension/extension.c
-          sed -i '/cpu_spoof_handler/d' extension/extension.c
+          sed -i '/#include "extension\/cpu_spoof.h"/d' drivers/kernelsu/ksu_main.c
+          sed -i '/#include "extension\/cpu_spoof.c"/d' drivers/kernelsu/ksu_main.c
+          sed -i '/cpu_spoof_handler = {/,/};/d' drivers/kernelsu/extension/extension.c
+          sed -i '/cpu_spoof_handler/d' drivers/kernelsu/extension/extension.c
           echo "cpu_spoof removed"
           python3 - <<'PY'
           import pathlib, sys
