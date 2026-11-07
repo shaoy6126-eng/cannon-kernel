@@ -99,11 +99,11 @@ jobs:
         run: |
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- "${{ inputs.defconfig }}"
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- HOSTCFLAGS="-fcommon" KCFLAGS="-fcommon" "${{ inputs.defconfig }}"
           echo "=== disable LTO in .config (defconfig cannot do this) ==="
           sed -i 's/^CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' out/.config
           ./scripts/config --file out/.config --disable LTO_CLANG || true
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- olddefconfig
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- HOSTCFLAGS="-fcommon" KCFLAGS="-fcommon" olddefconfig
           echo "=== key configs ==="
           grep -E "LTO|^CONFIG_KSU=|^CONFIG_KALLSYMS=|^CONFIG_THREAD_INFO_IN_TASK=" out/.config || true
           if grep -q '^CONFIG_LTO_CLANG=y' out/.config; then echo "ERROR: LTO still enabled"; exit 1; fi
@@ -113,7 +113,7 @@ jobs:
         run: |
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- Image -j"$(nproc)" 2>&1 | tee build.log
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- HOSTCFLAGS="-fcommon" KCFLAGS="-fcommon" Image -j"$(nproc)" 2>&1 | tee build.log
           test "${PIPESTATUS[0]}" -eq 0
           gzip -9 -c out/arch/arm64/boot/Image > out/arch/arm64/boot/Image.gz
           ls -l out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz
