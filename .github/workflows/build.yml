@@ -113,8 +113,10 @@ jobs:
         run: |
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- -j"$(nproc)" 2>&1 | tee build.log
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- Image -j"$(nproc)" 2>&1 | tee build.log
           test "${PIPESTATUS[0]}" -eq 0
+          gzip -9 -c out/arch/arm64/boot/Image > out/arch/arm64/boot/Image.gz
+          ls -l out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz
 
       - name: Collect artifacts
         if: success()
