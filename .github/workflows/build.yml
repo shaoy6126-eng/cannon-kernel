@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       defconfig:
-        description: "defconfig（cannon = Note 9 5G 国行）"
+        description: "defconfig (cannon = Note 9 5G)"
         required: true
         default: cannon_user_defconfig
         type: choice
@@ -12,7 +12,7 @@ on:
           - cannon_user_defconfig
           - cannong_user_defconfig
       ksu:
-        description: "是否集成 SukiSU（先用 true 试；编译失败再改 false 验证工具链）"
+        description: "Integrate SukiSU (true first; if build fails try false)"
         required: true
         default: true
         type: boolean
@@ -23,13 +23,12 @@ jobs:
     timeout-minutes: 150
 
     steps:
-      - name: 释放磁盘空间
+      - name: Clean disk
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache || true
           df -h /
 
-      - name: 拉取内核源码
+      - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
           repository: xandroid64/kernel_xiaomi_cannon
@@ -37,143 +36,101 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev \
-            build-essential python3 zip unzip cpio rsync device-tree-compiler
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev build-essential python3 zip unzip cpio rsync device-tree-compiler
 
-      - name: 下载工具链（clang r383902 + GCC 4.9）
+      - name: Download toolchain
         run: |
           set -e
           mkdir -p tc/clang tc/gcc
-          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-11.0.0_r48/clang-r383902.tar.gz" \
-            | tar -xz -C tc/clang
-          curl -LSs "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz" \
-            | tar -xz -C tc/gcc
+          curl -LSs "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-11.0.0_r48/clang-r383902.tar.gz" | tar -xz -C tc/clang
+          curl -LSs "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz" | tar -xz -C tc/gcc
           tc/clang/bin/clang --version | head -n1
           tc/gcc/bin/aarch64-linux-android-gcc --version | head -n1
 
-      - name: 集成 SukiSU 并打手动钩子
+      - name: Integrate SukiSU
         if: ${{ inputs.ksu }}
         working-directory: kernel
         run: |
           set -e
-          echo "===== 1. 拉取 SukiSU builtin 分支 ====="
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
-          test -L drivers/kernelsu || { echo "drivers/kernelsu 软链接不存在，setup.sh 失败"; exit 1; }
-
-          echo "===== 2. 打 4.14 手动钩子 ====="
+          test -L drivers/kernelsu
           python3 - <<'PY'
-import pathlib, sys
+          import pathlib, sys
 
-HOOKS = {
-    "fs/exec.c": (
-        "\tif (IS_ERR(filename))\n\t\treturn PTR_ERR(filename);\n",
-        """#ifdef CONFIG_KSU
-\t{
-\t\textern int ksu_handle_execveat_sucompat(int *, struct filename **,
-\t\t\t\t\t\tvoid *, void *, int *);
-\t\tksu_handle_execveat_sucompat((int *)AT_FDCWD, &filename,
-\t\t\t\t\t     &argv, &envp, 0);
-\t}
-#endif
-""",
-    ),
-    "fs/open.c": (
-        "\tif (mode & ~S_IRWXO)\t/* where's F_OK, X_OK, W_OK, R_OK? */\n",
-        """#ifdef CONFIG_KSU
-\t{
-\t\textern int ksu_handle_faccessat(int *, const char __user **, int *, int *);
-\t\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-\t}
-#endif
-""",
-    ),
-    "fs/stat.c": (
-        "\terror = vfs_fstatat(dfd, filename, &stat, flag);\n",
-        """#ifdef CONFIG_KSU
-\t{
-\t\textern int ksu_handle_stat(int *, const char __user **, int *);
-\t\tksu_handle_stat(&dfd, &filename, &flag);
-\t}
-#endif
-""",
-    ),
-}
+          HOOKS = {
+              "fs/exec.c": (
+                  "\tif (IS_ERR(filename))\n\t\treturn PTR_ERR(filename);\n",
+                  "#ifdef CONFIG_KSU\n\t{\n\t\textern int ksu_handle_execveat_sucompat(int *, struct filename **, void *, void *, int *);\n\t\tksu_handle_execveat_sucompat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n\t}\n#endif\n",
+              ),
+              "fs/open.c": (
+                  "\tif (mode & ~S_IRWXO)\t/* where's F_OK, X_OK, W_OK, R_OK? */\n",
+                  "#ifdef CONFIG_KSU\n\t{\n\t\textern int ksu_handle_faccessat(int *, const char __user **, int *, int *);\n\t\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n\t}\n#endif\n",
+              ),
+              "fs/stat.c": (
+                  "\terror = vfs_fstatat(dfd, filename, &stat, flag);\n",
+                  "#ifdef CONFIG_KSU\n\t{\n\t\textern int ksu_handle_stat(int *, const char __user **, int *);\n\t\tksu_handle_stat(&dfd, &filename, &flag);\n\t}\n#endif\n",
+              ),
+          }
 
-for path, (anchor, insert) in HOOKS.items():
-    p = pathlib.Path(path)
-    if not p.exists():
-        sys.exit(f"[FAIL] 文件不存在: {path}")
-    s = p.read_text(errors="surrogateescape")
-    if "CONFIG_KSU" in s and "ksu_handle_" in s:
-        print(f"[skip] {path} 已经打过钩子")
-        continue
-    if anchor not in s:
-        sys.exit(f"[FAIL] {path} 里找不到锚点，源码结构与预期不同")
-    s = s.replace(anchor, insert + anchor, 1)
-    p.write_text(s, errors="surrogateescape")
-    print(f"[ok] {path} 钩子已插入")
-PY
+          for path, (anchor, insert) in HOOKS.items():
+              p = pathlib.Path(path)
+              if not p.exists():
+                  sys.exit("[FAIL] missing file: " + path)
+              s = p.read_text(errors="surrogateescape")
+              if "ksu_handle_" in s:
+                  print("[skip] already patched: " + path)
+                  continue
+              if anchor not in s:
+                  sys.exit("[FAIL] anchor not found in " + path)
+              s = s.replace(anchor, insert + anchor, 1)
+              p.write_text(s, errors="surrogateescape")
+              print("[ok] patched: " + path)
+          PY
+          printf '\n# KernelSU\nCONFIG_KSU=y\n# CONFIG_KSU_SUSFS is not set\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
+          tail -n 5 "arch/arm64/configs/${{ inputs.defconfig }}"
 
-          echo "===== 3. 写入 defconfig ====="
-          cat >> "arch/arm64/configs/${{ inputs.defconfig }}" <<'EOF'
-
-# KernelSU (SukiSU-Ultra)
-CONFIG_KSU=y
-# CONFIG_KSU_SUSFS is not set
-EOF
-
-      - name: 配置
+      - name: Configure
         working-directory: kernel
         run: |
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
-          make O=out ARCH=arm64 \
-            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            "${{ inputs.defconfig }}"
-          make O=out ARCH=arm64 \
-            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            olddefconfig
-          echo "===== 关键 config ====="
-          grep -E "^CONFIG_(KSU|KALLSYMS|THREAD_INFO_IN_TASK|MODULES|SECURITY_SELINUX)=|^# CONFIG_KSU" out/.config || true
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- "${{ inputs.defconfig }}"
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- olddefconfig
+          grep -E "^CONFIG_(KSU|KALLSYMS|THREAD_INFO_IN_TASK|MODULES)=|^# CONFIG_KSU" out/.config || true
 
-      - name: 编译
+      - name: Build
         working-directory: kernel
         run: |
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
-          make O=out ARCH=arm64 \
-            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            -j"$(nproc)" 2>&1 | tee build.log
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- -j"$(nproc)" 2>&1 | tee build.log
           test "${PIPESTATUS[0]}" -eq 0
 
-      - name: 收集产物
+      - name: Collect artifacts
         if: success()
         working-directory: kernel
         run: |
           set -e
-          mkdir -p "$GITHUB_WORKSPACE/out-artifacts"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
           ls -l out/arch/arm64/boot/
           for f in Image Image.gz Image.gz-dtb; do
-            [ -f "out/arch/arm64/boot/$f" ] && cp "out/arch/arm64/boot/$f" "$GITHUB_WORKSPACE/out-artifacts/"
+            if [ -f "out/arch/arm64/boot/$f" ]; then cp "out/arch/arm64/boot/$f" "$GITHUB_WORKSPACE/artifacts/"; fi
           done
-          cd "$GITHUB_WORKSPACE/out-artifacts"
+          cd "$GITHUB_WORKSPACE/artifacts"
           sha256sum * | tee sha256.txt
           du -h *
 
-      - name: 上传产物
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: cannon-kernel-${{ inputs.defconfig }}-ksu${{ inputs.ksu }}
-          path: out-artifacts/
+          path: artifacts/
           if-no-files-found: error
 
-      - name: 失败时上传编译日志
+      - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
