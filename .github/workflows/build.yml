@@ -49,6 +49,7 @@ jobs:
           curl -LSs "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz" | tar -xz -C tc/gcc
           tc/clang/bin/clang --version | head -n1
           tc/gcc/bin/aarch64-linux-android-gcc --version | head -n1
+          tc/gcc/bin/aarch64-linux-android-ld.gold --version | head -n1 || true
 
       - name: Integrate SukiSU
         if: ${{ inputs.ksu }}
@@ -90,7 +91,13 @@ jobs:
               print("[ok] patched: " + path)
           PY
           printf '\n# KernelSU\nCONFIG_KSU=y\n# CONFIG_KSU_SUSFS is not set\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
-          tail -n 5 "arch/arm64/configs/${{ inputs.defconfig }}"
+
+      - name: Tweak defconfig
+        working-directory: kernel
+        run: |
+          set -e
+          printf '\n# toolchain compat\n# CONFIG_LTO_CLANG is not set\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
+          tail -n 8 "arch/arm64/configs/${{ inputs.defconfig }}"
 
       - name: Configure
         working-directory: kernel
@@ -99,7 +106,8 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- "${{ inputs.defconfig }}"
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- olddefconfig
-          grep -E "^CONFIG_(KSU|KALLSYMS|THREAD_INFO_IN_TASK|MODULES)=|^# CONFIG_KSU" out/.config || true
+          echo "=== key configs ==="
+          grep -E "^CONFIG_(KSU|KALLSYMS|THREAD_INFO_IN_TASK|MODULES|LTO)=|^# CONFIG_(KSU|LTO)" out/.config || true
 
       - name: Build
         working-directory: kernel
