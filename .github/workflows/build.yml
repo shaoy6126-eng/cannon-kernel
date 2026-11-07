@@ -1,4 +1,4 @@
-﻿name: Build cannon kernel
+name: Build cannon kernel
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
           - cannon_user_defconfig
           - cannong_user_defconfig
       ksu:
-        description: "Integrate SukiSU (true first; if build fails try false)"
+        description: "Integrate KernelSU-Next (true first; if build fails try false)"
         required: true
         default: true
         type: boolean
@@ -49,28 +49,21 @@ jobs:
           curl -LSs "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-11.0.0_r48.tar.gz" | tar -xz -C tc/gcc
           tc/clang/bin/clang --version | head -n1
           tc/gcc/bin/aarch64-linux-android-gcc --version | head -n1
-          tc/gcc/bin/aarch64-linux-android-ld.gold --version | head -n1 || true
 
-      - name: Integrate SukiSU
+      - name: Integrate KernelSU-Next
         if: ${{ inputs.ksu }}
         working-directory: kernel
         run: |
           set -e
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
           test -L drivers/kernelsu
-          # remove cpu_spoof extension (needs 5.3+ vdso/datapage.h)
-          sed -i '/#include "extension\/cpu_spoof.h"/d' drivers/kernelsu/ksu_main.c
-          sed -i '/#include "extension\/cpu_spoof.c"/d' drivers/kernelsu/ksu_main.c
-          sed -i '/cpu_spoof_handler = {/,/};/d' drivers/kernelsu/extension/extension.c
-          sed -i '/cpu_spoof_handler/d' drivers/kernelsu/extension/extension.c
-          echo "cpu_spoof removed"
           python3 - <<'PY'
           import pathlib, sys
 
           HOOKS = {
               "fs/exec.c": (
                   "\tif (IS_ERR(filename))\n\t\treturn PTR_ERR(filename);\n",
-                  "#ifdef CONFIG_KSU\n\t{\n\t\textern int ksu_handle_execveat_sucompat(int *, struct filename **, void *, void *, int *);\n\t\tksu_handle_execveat_sucompat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n\t}\n#endif\n",
+                  "#ifdef CONFIG_KSU\n\t{\n\t\textern int ksu_handle_execveat(int *, struct filename **, void *, void *, int *);\n\t\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n\t}\n#endif\n",
               ),
               "fs/open.c": (
                   "\tif (mode & ~S_IRWXO)\t/* where's F_OK, X_OK, W_OK, R_OK? */\n",
@@ -96,22 +89,7 @@ jobs:
               p.write_text(s, errors="surrogateescape")
               print("[ok] patched: " + path)
           PY
-          cat > include/linux/static_call.h <<'EOF'
-          #ifndef _LINUX_STATIC_CALL_H
-          #define _LINUX_STATIC_CALL_H
-          #include <linux/types.h>
-          #define DEFINE_STATIC_CALL(name, target) typeof(target) *__sc_##name = (target)
-          #define DECLARE_STATIC_CALL(name, target) extern typeof(target) *__sc_##name
-          #define static_call(name) (__sc_##name)
-          #define static_call_cond(name) (__sc_##name)
-          #define static_call_update(name, fn) do { __sc_##name = (fn); } while (0)
-          #define DEFINE_STATIC_CALL_RET0(name, target) DEFINE_STATIC_CALL(name, target)
-          #define static_call_return0(name) 0
-          #endif
-          EOF
-          printf '\n# KernelSU\nCONFIG_KSU=y\n# CONFIG_KSU_SUSFS is not set\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
-
-
+          printf '\n# KernelSU\nCONFIG_KSU=y\n' >> "arch/arm64/configs/${{ inputs.defconfig }}"
 
       - name: Configure
         working-directory: kernel
@@ -119,7 +97,6 @@ jobs:
           set -e
           export PATH="$GITHUB_WORKSPACE/tc/clang/bin:$GITHUB_WORKSPACE/tc/gcc/bin:$PATH"
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- HOSTCFLAGS="-fcommon" KCFLAGS="-fcommon" "${{ inputs.defconfig }}"
-          echo "=== disable LTO in .config (defconfig cannot do this) ==="
           sed -i 's/^CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' out/.config
           ./scripts/config --file out/.config --disable LTO_CLANG || true
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- HOSTCFLAGS="-fcommon" KCFLAGS="-fcommon" olddefconfig
